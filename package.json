@@ -1,0 +1,18 @@
+{
+  "name": "com.blueeyss14.groundblender",
+  "version": "1.0.0",
+  "displayName": "Ground Blender URP",
+  "description": "Ground Blender URP tool for Unity. Easily blend objects into ground/terrain shaders in URP.",
+  "unity": "2021.3",
+  "keywords": [
+    "ground",
+    "blender",
+    "urp",
+    "shader",
+    "terrain"
+  ],
+  "author": {
+    "name": "Blueeyss14",
+    "url": "https://github.com/Blueeyss14/Unity-Ground-Blender"
+  }
+}
