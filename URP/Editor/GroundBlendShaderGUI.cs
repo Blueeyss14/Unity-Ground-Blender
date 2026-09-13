@@ -5,7 +5,6 @@ public class GroundBlendShaderGUI : ShaderGUI
 {
     private Terrain selectedTerrain;
     private GameObject selectedGameObject;
-    private int selectedLayerIndex = 0;
 
     public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)
     {
@@ -15,6 +14,10 @@ public class GroundBlendShaderGUI : ShaderGUI
         if (selectedTerrain == null && selectedGameObject == null && targetMat.HasProperty("_HasGroundTexture") && targetMat.GetFloat("_HasGroundTexture") > 0.5f)
         {
             selectedTerrain = Terrain.activeTerrain;
+            if (selectedTerrain != null)
+            {
+                ExtractAndApplyGroundTextures(targetMat, selectedTerrain, null);
+            }
         }
 
         EditorGUILayout.LabelField("Object Settings", EditorStyles.boldLabel);
@@ -63,39 +66,35 @@ public class GroundBlendShaderGUI : ShaderGUI
                 Undo.RecordObject(targetMat, "Clear Ground Textures");
                 targetMat.SetTexture("_GroundAlbedoMap", null);
                 targetMat.SetTexture("_GroundBumpMap", null);
+                targetMat.SetTexture("_TerrainControl", null);
+                for (int i = 0; i < 4; i++)
+                {
+                    targetMat.SetTexture("_TerrainSplat" + i, null);
+                    targetMat.SetTexture("_TerrainNormal" + i, null);
+                }
                 if (targetMat.HasProperty("_HasGroundTexture")) targetMat.SetFloat("_HasGroundTexture", 0.0f);
+                if (targetMat.HasProperty("_HasTerrainData")) targetMat.SetFloat("_HasTerrainData", 0.0f);
                 EditorUtility.SetDirty(targetMat);
             }
         }
 
-        if (selectedTerrain != null && selectedTerrain.terrainData != null)
-        {
-            TerrainLayer[] layers = selectedTerrain.terrainData.terrainLayers;
-            if (layers != null && layers.Length > 0)
-            {
-                string[] layerNames = new string[layers.Length];
-                for (int i = 0; i < layers.Length; i++)
-                {
-                    layerNames[i] = layers[i] != null ? $"Layer {i}: {layers[i].name}" : $"Layer {i}";
-                }
-
-                EditorGUI.BeginChangeCheck();
-                selectedLayerIndex = EditorGUILayout.Popup("Terrain Layer", selectedLayerIndex, layerNames);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    ExtractAndApplyGroundTextures(targetMat, selectedTerrain, selectedGameObject);
-                }
-            }
-        }
-
         float hasGround = targetMat.HasProperty("_HasGroundTexture") ? targetMat.GetFloat("_HasGroundTexture") : 0.0f;
-        Texture groundAlbedo = targetMat.HasProperty("_GroundAlbedoMap") ? targetMat.GetTexture("_GroundAlbedoMap") : null;
-        float groundTiling = targetMat.HasProperty("_GroundTiling") ? targetMat.GetFloat("_GroundTiling") : 0.1f;
+        float hasTerrain = targetMat.HasProperty("_HasTerrainData") ? targetMat.GetFloat("_HasTerrainData") : 0.0f;
 
         EditorGUILayout.Space(5);
-        if (hasGround >= 0.5f && groundAlbedo != null)
+        if (hasGround >= 0.5f)
         {
-            EditorGUILayout.LabelField($"Status: Active ({groundAlbedo.name} | Tiling: {groundTiling:F3})", EditorStyles.miniBoldLabel);
+            if (hasTerrain >= 0.5f && selectedTerrain != null)
+            {
+                EditorGUILayout.LabelField($"Status: Active ({selectedTerrain.name} | All Layers Blended)", EditorStyles.miniBoldLabel);
+            }
+            else
+            {
+                Texture groundAlbedo = targetMat.HasProperty("_GroundAlbedoMap") ? targetMat.GetTexture("_GroundAlbedoMap") : null;
+                float groundTiling = targetMat.HasProperty("_GroundTiling") ? targetMat.GetFloat("_GroundTiling") : 0.1f;
+                string texName = groundAlbedo != null ? groundAlbedo.name : "Active";
+                EditorGUILayout.LabelField($"Status: Active ({texName} | Tiling: {groundTiling:F3})", EditorStyles.miniBoldLabel);
+            }
         }
         else
         {
@@ -122,34 +121,74 @@ public class GroundBlendShaderGUI : ShaderGUI
     {
         if (mat == null) return;
 
-        Texture2D albedoTex = null;
-        Texture2D normalTex = null;
-        float tiling = 0.1f;
-        float smoothness = 0.2f;
+        Undo.RecordObject(mat, "Update Ground Blend Textures");
 
         if (terrainSource != null && terrainSource.terrainData != null)
         {
+            mat.SetColor("_GroundColor", Color.white);
             TerrainData tData = terrainSource.terrainData;
-            TerrainLayer[] layers = tData.terrainLayers;
-            if (layers != null && layers.Length > 0)
+            Texture2D[] alphaTexs = tData.alphamapTextures;
+            if (alphaTexs != null && alphaTexs.Length > 0 && alphaTexs[0] != null)
             {
-                int index = Mathf.Clamp(selectedLayerIndex, 0, layers.Length - 1);
-                TerrainLayer layer = layers[index];
-                if (layer != null)
+                mat.SetTexture("_TerrainControl", alphaTexs[0]);
+                Shader.SetGlobalTexture("_TerrainControl", alphaTexs[0]);
+            }
+
+            TerrainLayer[] layers = tData.terrainLayers;
+            if (layers != null)
+            {
+                for (int i = 0; i < 4; i++)
                 {
-                    albedoTex = layer.diffuseTexture;
-                    normalTex = layer.normalMapTexture;
-                    if (layer.tileSize.x > 0.001f)
+                    Texture2D diffuse = null;
+                    Texture2D normal = null;
+                    float tiling = 0.1f;
+
+                    if (i < layers.Length && layers[i] != null)
                     {
-                        tiling = 1.0f / layer.tileSize.x;
+                        diffuse = layers[i].diffuseTexture;
+                        normal = layers[i].normalMapTexture;
+                        if (layers[i].tileSize.x > 0.001f)
+                        {
+                            tiling = 1.0f / layers[i].tileSize.x;
+                        }
                     }
-                    smoothness = layer.smoothness;
+
+                    mat.SetTexture("_TerrainSplat" + i, diffuse);
+                    mat.SetTexture("_TerrainNormal" + i, normal);
+                    mat.SetVector("_TerrainTileSize" + i, new Vector4(tiling, tiling, 0, 0));
+
+                    if (diffuse != null) Shader.SetGlobalTexture("_TerrainSplat" + i, diffuse);
+                    if (normal != null) Shader.SetGlobalTexture("_TerrainNormal" + i, normal);
+                    Shader.SetGlobalVector("_TerrainTileSize" + i, new Vector4(tiling, tiling, 0, 0));
+                }
+
+                if (layers.Length > 0 && layers[0] != null)
+                {
+                    mat.SetTexture("_GroundAlbedoMap", layers[0].diffuseTexture);
                 }
             }
+
+            Vector3 pos = terrainSource.transform.position;
+            Vector3 size = tData.size;
+            Vector4 posVec = new Vector4(pos.x, pos.y, pos.z, 0);
+            Vector4 sizeVec = new Vector4(size.x, size.y, size.z, 0);
+
+            mat.SetVector("_TerrainPosition", posVec);
+            mat.SetVector("_TerrainSize", sizeVec);
+            Shader.SetGlobalVector("_TerrainPosition", posVec);
+            Shader.SetGlobalVector("_TerrainSize", sizeVec);
+
+            if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 1.0f);
+            if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 1.0f);
+            Shader.SetGlobalFloat("_HasTerrainData", 1.0f);
         }
         else if (goSource != null)
         {
             Renderer r = goSource.GetComponent<Renderer>();
+            Texture2D albedoTex = null;
+            Texture2D normalTex = null;
+            float tiling = 0.1f;
+
             if (r != null && r.sharedMaterial != null)
             {
                 Material groundMat = r.sharedMaterial;
@@ -161,22 +200,35 @@ public class GroundBlendShaderGUI : ShaderGUI
                 Vector2 scale = groundMat.GetTextureScale("_BaseMap");
                 if (scale.x > 0) tiling = scale.x * 0.1f;
             }
-        }
 
-        Undo.RecordObject(mat, "Update Ground Blend Textures");
-
-        if (albedoTex != null)
-        {
-            mat.SetTexture("_GroundAlbedoMap", albedoTex);
-            if (normalTex != null) mat.SetTexture("_GroundBumpMap", normalTex);
-            mat.SetFloat("_GroundTiling", tiling);
-            mat.SetFloat("_GroundSmoothness", smoothness);
-            if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 1.0f);
+            if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 0.0f);
+            Shader.SetGlobalFloat("_HasTerrainData", 0.0f);
+            if (albedoTex != null)
+            {
+                mat.SetTexture("_GroundAlbedoMap", albedoTex);
+                if (normalTex != null) mat.SetTexture("_GroundBumpMap", normalTex);
+                mat.SetFloat("_GroundTiling", tiling);
+                if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 1.0f);
+            }
+            else
+            {
+                mat.SetTexture("_GroundAlbedoMap", null);
+                mat.SetTexture("_GroundBumpMap", null);
+                if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 0.0f);
+            }
         }
         else
         {
+            if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 0.0f);
+            Shader.SetGlobalFloat("_HasTerrainData", 0.0f);
             mat.SetTexture("_GroundAlbedoMap", null);
             mat.SetTexture("_GroundBumpMap", null);
+            mat.SetTexture("_TerrainControl", null);
+            for (int i = 0; i < 4; i++)
+            {
+                mat.SetTexture("_TerrainSplat" + i, null);
+                mat.SetTexture("_TerrainNormal" + i, null);
+            }
             if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 0.0f);
         }
 

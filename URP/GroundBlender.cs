@@ -52,11 +52,13 @@ public class GroundBlender : MonoBehaviour
             for (int i = 0; i < 4; i++)
             {
                 Texture2D diffuse = null;
+                Texture2D normal = null;
                 float tiling = 0.1f;
 
                 if (i < layers.Length && layers[i] != null)
                 {
                     diffuse = layers[i].diffuseTexture;
+                    normal = layers[i].normalMapTexture;
                     if (layers[i].tileSize.x > 0.001f)
                     {
                         tiling = 1.0f / layers[i].tileSize.x;
@@ -64,11 +66,16 @@ public class GroundBlender : MonoBehaviour
                 }
 
                 string texProp = "_TerrainSplat" + i;
+                string normProp = "_TerrainNormal" + i;
                 string tileProp = "_TerrainTileSize" + i;
 
                 if (diffuse != null)
                 {
                     Shader.SetGlobalTexture(texProp, diffuse);
+                }
+                if (normal != null)
+                {
+                    Shader.SetGlobalTexture(normProp, normal);
                 }
                 Shader.SetGlobalVector(tileProp, new Vector4(tiling, tiling, 0, 0));
             }
