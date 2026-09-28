@@ -5,18 +5,42 @@ public class GroundBlendShaderGUI : ShaderGUI
 {
     private Terrain selectedTerrain;
     private GameObject selectedGameObject;
+    private bool useTerrainMode = true;
+    private bool isInitialized = false;
 
     public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)
     {
         Material targetMat = materialEditor.target as Material;
         if (targetMat == null) return;
 
-        if (selectedTerrain == null && selectedGameObject == null && targetMat.HasProperty("_HasGroundTexture") && targetMat.GetFloat("_HasGroundTexture") > 0.5f)
+        if (!isInitialized)
         {
-            selectedTerrain = Terrain.activeTerrain;
-            if (selectedTerrain != null)
+            isInitialized = true;
+            string keyMode = "GBlend_Mode_" + targetMat.GetInstanceID();
+            string keyGO = "GBlend_GO_" + targetMat.GetInstanceID();
+            string keyTerr = "GBlend_Terr_" + targetMat.GetInstanceID();
+
+            if (EditorPrefs.HasKey(keyMode))
             {
-                ExtractAndApplyGroundTextures(targetMat, selectedTerrain, null);
+                useTerrainMode = EditorPrefs.GetBool(keyMode);
+            }
+            else if (targetMat.HasProperty("_HasTerrainData"))
+            {
+                useTerrainMode = targetMat.GetFloat("_HasTerrainData") > 0.5f;
+            }
+
+            if (useTerrainMode && EditorPrefs.HasKey(keyTerr))
+            {
+                selectedTerrain = EditorUtility.InstanceIDToObject(EditorPrefs.GetInt(keyTerr)) as Terrain;
+            }
+            else if (!useTerrainMode && EditorPrefs.HasKey(keyGO))
+            {
+                selectedGameObject = EditorUtility.InstanceIDToObject(EditorPrefs.GetInt(keyGO)) as GameObject;
+            }
+
+            if (useTerrainMode && selectedTerrain == null && targetMat.HasProperty("_HasTerrainData") && targetMat.GetFloat("_HasTerrainData") > 0.5f)
+            {
+                selectedTerrain = Terrain.activeTerrain;
             }
         }
 
@@ -38,12 +62,39 @@ public class GroundBlendShaderGUI : ShaderGUI
         EditorGUILayout.Space(15);
 
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-        EditorGUILayout.LabelField("Ground Terrain Drag & Drop", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("Drag & drop your Terrain (or Ground GameObject) directly into the box below to enable ground blending!", MessageType.Info);
+        EditorGUILayout.LabelField("Ground Blending Target", EditorStyles.boldLabel);
+
+        EditorGUILayout.BeginHorizontal();
+        bool isTerrainTarget = useTerrainMode;
+        isTerrainTarget = EditorGUILayout.ToggleLeft("Terrain", isTerrainTarget, GUILayout.Width(80));
+        bool isObjectTarget = !useTerrainMode;
+        isObjectTarget = EditorGUILayout.ToggleLeft("Object", isObjectTarget, GUILayout.Width(80));
+        EditorGUILayout.EndHorizontal();
+
+        if (isTerrainTarget && !useTerrainMode)
+        {
+            useTerrainMode = true;
+            EditorPrefs.SetBool("GBlend_Mode_" + targetMat.GetInstanceID(), true);
+        }
+        else if (isObjectTarget && useTerrainMode)
+        {
+            useTerrainMode = false;
+            EditorPrefs.SetBool("GBlend_Mode_" + targetMat.GetInstanceID(), false);
+        }
+
+        EditorGUILayout.HelpBox(useTerrainMode ? "Drag & drop your Terrain directly into the box below to enable ground blending!" : "Drag & drop your Ground GameObject directly into the box below to enable ground blending!", MessageType.Info);
 
         EditorGUI.BeginChangeCheck();
-        UnityEngine.Object currentSource = selectedTerrain != null ? (UnityEngine.Object)selectedTerrain : (UnityEngine.Object)selectedGameObject;
-        UnityEngine.Object newSource = EditorGUILayout.ObjectField("Target Terrain / Ground", currentSource, typeof(UnityEngine.Object), true);
+
+        UnityEngine.Object newSource = null;
+        if (useTerrainMode)
+        {
+            newSource = EditorGUILayout.ObjectField("Target Terrain", selectedTerrain, typeof(Terrain), true);
+        }
+        else
+        {
+            newSource = EditorGUILayout.ObjectField("Target Object", selectedGameObject, typeof(GameObject), true);
+        }
 
         if (EditorGUI.EndChangeCheck())
         {
@@ -51,18 +102,22 @@ public class GroundBlendShaderGUI : ShaderGUI
             {
                 selectedTerrain = t;
                 selectedGameObject = null;
+                EditorPrefs.SetInt("GBlend_Terr_" + targetMat.GetInstanceID(), t.gameObject.GetInstanceID());
                 ExtractAndApplyGroundTextures(targetMat, selectedTerrain, null);
             }
             else if (newSource is GameObject go)
             {
                 selectedTerrain = go.GetComponent<Terrain>();
                 selectedGameObject = go;
+                EditorPrefs.SetInt("GBlend_GO_" + targetMat.GetInstanceID(), go.GetInstanceID());
                 ExtractAndApplyGroundTextures(targetMat, selectedTerrain, go);
             }
             else
             {
                 selectedTerrain = null;
                 selectedGameObject = null;
+                EditorPrefs.DeleteKey("GBlend_Terr_" + targetMat.GetInstanceID());
+                EditorPrefs.DeleteKey("GBlend_GO_" + targetMat.GetInstanceID());
                 Undo.RecordObject(targetMat, "Clear Ground Textures");
                 targetMat.SetTexture("_GroundAlbedoMap", null);
                 targetMat.SetTexture("_GroundBumpMap", null);
