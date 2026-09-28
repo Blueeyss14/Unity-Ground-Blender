@@ -18,6 +18,23 @@ Shader "Ground Blender URP"
         [HideInInspector] _GroundTiling ("Ground Texture Scale / Tiling", Float) = 0.1
         [HideInInspector] _GroundSmoothness ("Ground Smoothness", Range(0, 1)) = 0.2
 
+        [HideInInspector] _HasTerrainData ("Has Terrain Data", Float) = 0
+        [HideInInspector] _TerrainPosition ("Terrain Position", Vector) = (0,0,0,0)
+        [HideInInspector] _TerrainSize ("Terrain Size", Vector) = (1,1,1,0)
+        [HideInInspector] _TerrainTileSize0 ("Terrain Tile 0", Vector) = (0.1,0.1,0,0)
+        [HideInInspector] _TerrainTileSize1 ("Terrain Tile 1", Vector) = (0.1,0.1,0,0)
+        [HideInInspector] _TerrainTileSize2 ("Terrain Tile 2", Vector) = (0.1,0.1,0,0)
+        [HideInInspector] _TerrainTileSize3 ("Terrain Tile 3", Vector) = (0.1,0.1,0,0)
+        [HideInInspector] _TerrainControl ("Terrain Control", 2D) = "black" {}
+        [HideInInspector] _TerrainSplat0 ("Terrain Splat 0", 2D) = "white" {}
+        [HideInInspector] _TerrainSplat1 ("Terrain Splat 1", 2D) = "white" {}
+        [HideInInspector] _TerrainSplat2 ("Terrain Splat 2", 2D) = "white" {}
+        [HideInInspector] _TerrainSplat3 ("Terrain Splat 3", 2D) = "white" {}
+        [HideInInspector] _TerrainNormal0 ("Terrain Normal 0", 2D) = "bump" {}
+        [HideInInspector] _TerrainNormal1 ("Terrain Normal 1", 2D) = "bump" {}
+        [HideInInspector] _TerrainNormal2 ("Terrain Normal 2", 2D) = "bump" {}
+        [HideInInspector] _TerrainNormal3 ("Terrain Normal 3", 2D) = "bump" {}
+
         [Header(Blending Parameters)]
         _BlendDistance ("Blend Distance (Height)", Range(0.01, 5.0)) = 0.8
         _BlendContrast ("Blend Falloff / Softness", Range(0.1, 5.0)) = 1.5
@@ -111,15 +128,15 @@ Shader "Ground Blender URP"
                 float _BlendDistance;
                 float _BlendContrast;
                 float _NormalBlendStrength;
-            CBUFFER_END
 
-            float _HasTerrainData;
-            float4 _TerrainPosition;
-            float4 _TerrainSize;
-            float4 _TerrainTileSize0;
-            float4 _TerrainTileSize1;
-            float4 _TerrainTileSize2;
-            float4 _TerrainTileSize3;
+                float _HasTerrainData;
+                float4 _TerrainPosition;
+                float4 _TerrainSize;
+                float4 _TerrainTileSize0;
+                float4 _TerrainTileSize1;
+                float4 _TerrainTileSize2;
+                float4 _TerrainTileSize3;
+            CBUFFER_END
 
             Varyings vert(Attributes input)
             {
@@ -152,13 +169,10 @@ Shader "Ground Blender URP"
                 float2 screenUV = input.screenPos.xy / input.screenPos.w;
                 float rawDepth = SampleSceneDepth(screenUV);
 
-                // Posisi world dari titik tanah/scene yang terlihat di belakang pixel ini
                 float3 sceneWS = ComputeWorldSpacePosition(screenUV, rawDepth, UNITY_MATRIX_I_VP);
 
-                // Tinggi permukaan objek di atas tanah (world space, tidak tergantung sudut kamera)
                 float heightAboveGround = max(0.0, input.positionWS.y - sceneWS.y);
 
-                // Kalau tidak ada geometri di belakang (langit), anggap tidak ada tanah -> full object
                 #if UNITY_REVERSED_Z
                     bool noSceneBehind = rawDepth < 0.00001;
                 #else
@@ -166,7 +180,6 @@ Shader "Ground Blender URP"
                 #endif
                 if (noSceneBehind) heightAboveGround = _BlendDistance;
 
-                // Tanah "dilipat" naik mengikuti panjang permukaan (arc length), jadi di permukaan miring tidak melar
                 float foldH = min(heightAboveGround, _BlendDistance);
                 float2 nXZ = input.normalWS.xz;
                 float2 groundXZ = input.positionWS.xz + nXZ * foldH / max(dot(nXZ, nXZ), 0.04);
