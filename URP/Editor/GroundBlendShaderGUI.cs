@@ -31,7 +31,12 @@ public class GroundBlendShaderGUI : ShaderGUI
 
             if (useTerrainMode && EditorPrefs.HasKey(keyTerr))
             {
-                selectedTerrain = EditorUtility.InstanceIDToObject(EditorPrefs.GetInt(keyTerr)) as Terrain;
+                var loadedObj = EditorUtility.InstanceIDToObject(EditorPrefs.GetInt(keyTerr));
+                selectedTerrain = loadedObj as Terrain;
+                if (selectedTerrain == null && loadedObj is GameObject go)
+                {
+                    selectedTerrain = go.GetComponent<Terrain>();
+                }
             }
             else if (!useTerrainMode && EditorPrefs.HasKey(keyGO))
             {
@@ -102,7 +107,7 @@ public class GroundBlendShaderGUI : ShaderGUI
             {
                 selectedTerrain = t;
                 selectedGameObject = null;
-                EditorPrefs.SetInt("GBlend_Terr_" + targetMat.GetInstanceID(), t.gameObject.GetInstanceID());
+                EditorPrefs.SetInt("GBlend_Terr_" + targetMat.GetInstanceID(), t.GetInstanceID());
                 ExtractAndApplyGroundTextures(targetMat, selectedTerrain, null);
             }
             else if (newSource is GameObject go)
