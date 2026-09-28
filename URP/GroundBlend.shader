@@ -152,11 +152,26 @@ Shader "Ground Blender URP"
                 float2 screenUV = input.screenPos.xy / input.screenPos.w;
                 float rawDepth = SampleSceneDepth(screenUV);
 
-                float backgroundLinearDepth = LinearEyeDepth(rawDepth, _ZBufferParams);
-                float surfaceLinearDepth = input.screenPos.w;
-                float depthDiff = max(0.0, backgroundLinearDepth - surfaceLinearDepth);
+                // Posisi world dari titik tanah/scene yang terlihat di belakang pixel ini
+                float3 sceneWS = ComputeWorldSpacePosition(screenUV, rawDepth, UNITY_MATRIX_I_VP);
 
-                float blendFactor = saturate(depthDiff / max(0.001, _BlendDistance));
+                // Tinggi permukaan objek di atas tanah (world space, tidak tergantung sudut kamera)
+                float heightAboveGround = max(0.0, input.positionWS.y - sceneWS.y);
+
+                // Kalau tidak ada geometri di belakang (langit), anggap tidak ada tanah -> full object
+                #if UNITY_REVERSED_Z
+                    bool noSceneBehind = rawDepth < 0.00001;
+                #else
+                    bool noSceneBehind = rawDepth > 0.99999;
+                #endif
+                if (noSceneBehind) heightAboveGround = _BlendDistance;
+
+                // Tanah "dilipat" naik mengikuti panjang permukaan (arc length), jadi di permukaan miring tidak melar
+                float foldH = min(heightAboveGround, _BlendDistance);
+                float2 nXZ = input.normalWS.xz;
+                float2 groundXZ = input.positionWS.xz + nXZ * foldH / max(dot(nXZ, nXZ), 0.04);
+
+                float blendFactor = saturate(heightAboveGround / max(0.001, _BlendDistance));
                 blendFactor = pow(blendFactor, max(0.01, _BlendContrast));
 
                 if (_HasGroundTexture < 0.5)
@@ -178,7 +193,7 @@ Shader "Ground Blender URP"
                 {
                     if (_HasTerrainData >= 0.5)
                     {
-                        float2 terrainUV = saturate((input.positionWS.xz - _TerrainPosition.xz) / max(float2(0.001, 0.001), _TerrainSize.xz));
+                        float2 terrainUV = saturate((groundXZ - _TerrainPosition.xz) / max(float2(0.001, 0.001), _TerrainSize.xz));
                         half4 splatControl = SAMPLE_TEXTURE2D(_TerrainControl, sampler_BaseMap, terrainUV);
                         half totalSplatWeight = splatControl.r + splatControl.g + splatControl.b + splatControl.a;
                         if (totalSplatWeight > 0.001)
@@ -192,6 +207,7 @@ Shader "Ground Blender URP"
 
                         #if defined(_TRIPLANAR_GROUND)
                             float3 blendWeights = pow(abs(input.normalWS), 4.0);
+                            blendWeights = lerp(float3(0.0, 1.0, 0.0), blendWeights, blendFactor);
                             blendWeights /= max(0.00001, blendWeights.x + blendWeights.y + blendWeights.z);
 
                             float tile0 = _TerrainTileSize0.x > 0.0001 ? _TerrainTileSize0.x : 0.1;
@@ -204,10 +220,10 @@ Shader "Ground Blender URP"
                             float2 uv2_X = input.positionWS.zy * tile2;
                             float2 uv3_X = input.positionWS.zy * tile3;
 
-                            float2 uv0_Y = input.positionWS.xz * tile0;
-                            float2 uv1_Y = input.positionWS.xz * tile1;
-                            float2 uv2_Y = input.positionWS.xz * tile2;
-                            float2 uv3_Y = input.positionWS.xz * tile3;
+                            float2 uv0_Y = groundXZ * tile0;
+                            float2 uv1_Y = groundXZ * tile1;
+                            float2 uv2_Y = groundXZ * tile2;
+                            float2 uv3_Y = groundXZ * tile3;
 
                             float2 uv0_Z = input.positionWS.xy * tile0;
                             float2 uv1_Z = input.positionWS.xy * tile1;
@@ -260,10 +276,10 @@ Shader "Ground Blender URP"
                             float tile2 = _TerrainTileSize2.x > 0.0001 ? _TerrainTileSize2.x : tile0;
                             float tile3 = _TerrainTileSize3.x > 0.0001 ? _TerrainTileSize3.x : tile0;
 
-                            float2 uv0 = input.positionWS.xz * tile0;
-                            float2 uv1 = input.positionWS.xz * tile1;
-                            float2 uv2 = input.positionWS.xz * tile2;
-                            float2 uv3 = input.positionWS.xz * tile3;
+                            float2 uv0 = groundXZ * tile0;
+                            float2 uv1 = groundXZ * tile1;
+                            float2 uv2 = groundXZ * tile2;
+                            float2 uv3 = groundXZ * tile3;
 
                             half4 c0 = SAMPLE_TEXTURE2D(_TerrainSplat0, sampler_BaseMap, uv0);
                             half4 c1 = SAMPLE_TEXTURE2D(_TerrainSplat1, sampler_BaseMap, uv1);
@@ -285,10 +301,11 @@ Shader "Ground Blender URP"
                     {
                         #if defined(_TRIPLANAR_GROUND)
                             float3 blendWeights = pow(abs(input.normalWS), 4.0);
+                            blendWeights = lerp(float3(0.0, 1.0, 0.0), blendWeights, blendFactor);
                             blendWeights /= max(0.00001, blendWeights.x + blendWeights.y + blendWeights.z);
 
                             float2 uvX = input.positionWS.zy * _GroundTiling;
-                            float2 uvY = input.positionWS.xz * _GroundTiling;
+                            float2 uvY = groundXZ * _GroundTiling;
                             float2 uvZ = input.positionWS.xy * _GroundTiling;
 
                             half4 gX = SAMPLE_TEXTURE2D(_GroundAlbedoMap, sampler_BaseMap, uvX);
@@ -303,7 +320,7 @@ Shader "Ground Blender URP"
                             half3 nZ = UnpackGroundNormal(SAMPLE_TEXTURE2D(_GroundBumpMap, sampler_BumpMap, uvZ), _GroundBumpScale);
                             groundNormalTS = nX * blendWeights.x + nY * blendWeights.y + nZ * blendWeights.z;
                         #else
-                            float2 groundUV = input.positionWS.xz * _GroundTiling;
+                            float2 groundUV = groundXZ * _GroundTiling;
                             half4 groundTint = (_GroundColor.r + _GroundColor.g + _GroundColor.b < 0.01) ? half4(1,1,1,1) : _GroundColor;
                             groundAlbedo = SAMPLE_TEXTURE2D(_GroundAlbedoMap, sampler_BaseMap, groundUV) * groundTint;
                             groundNormalTS = UnpackGroundNormal(SAMPLE_TEXTURE2D(_GroundBumpMap, sampler_BumpMap, groundUV), _GroundBumpScale);
