@@ -19,12 +19,6 @@ Shader "Ground Blender URP"
         [HideInInspector] _GroundSmoothness ("Ground Smoothness", Range(0, 1)) = 0.2
 
         [HideInInspector] _HasTerrainData ("Has Terrain Data", Float) = 0
-        [HideInInspector] _TerrainPosition ("Terrain Position", Vector) = (0,0,0,0)
-        [HideInInspector] _TerrainSize ("Terrain Size", Vector) = (1,1,1,0)
-        [HideInInspector] _TerrainTileSize0 ("Terrain Tile 0", Vector) = (0.1,0.1,0,0)
-        [HideInInspector] _TerrainTileSize1 ("Terrain Tile 1", Vector) = (0.1,0.1,0,0)
-        [HideInInspector] _TerrainTileSize2 ("Terrain Tile 2", Vector) = (0.1,0.1,0,0)
-        [HideInInspector] _TerrainTileSize3 ("Terrain Tile 3", Vector) = (0.1,0.1,0,0)
         [HideInInspector] _TerrainControl ("Terrain Control", 2D) = "black" {}
         [HideInInspector] _TerrainSplat0 ("Terrain Splat 0", 2D) = "white" {}
         [HideInInspector] _TerrainSplat1 ("Terrain Splat 1", 2D) = "white" {}
@@ -130,13 +124,14 @@ Shader "Ground Blender URP"
                 float _NormalBlendStrength;
 
                 float _HasTerrainData;
-                float4 _TerrainPosition;
-                float4 _TerrainSize;
-                float4 _TerrainTileSize0;
-                float4 _TerrainTileSize1;
-                float4 _TerrainTileSize2;
-                float4 _TerrainTileSize3;
             CBUFFER_END
+
+            float4 _TerrainPosition;
+            float4 _TerrainSize;
+            float4 _TerrainTileSize0;
+            float4 _TerrainTileSize1;
+            float4 _TerrainTileSize2;
+            float4 _TerrainTileSize3;
 
             Varyings vert(Attributes input)
             {
@@ -207,6 +202,12 @@ Shader "Ground Blender URP"
                     if (_HasTerrainData >= 0.5)
                     {
                         float2 terrainUV = saturate((groundXZ - _TerrainPosition.xz) / max(float2(0.001, 0.001), _TerrainSize.xz));
+
+                        // Terrain-local coordinates so tiling follows the terrain position
+                        float2 tGroundXZ = groundXZ - _TerrainPosition.xz;
+                        float2 tPosZY    = input.positionWS.zy - _TerrainPosition.zy;
+                        float2 tPosXY    = input.positionWS.xy - _TerrainPosition.xy;
+
                         half4 splatControl = SAMPLE_TEXTURE2D(_TerrainControl, sampler_BaseMap, terrainUV);
                         half totalSplatWeight = splatControl.r + splatControl.g + splatControl.b + splatControl.a;
                         if (totalSplatWeight > 0.001)
@@ -223,25 +224,25 @@ Shader "Ground Blender URP"
                             blendWeights = lerp(float3(0.0, 1.0, 0.0), blendWeights, blendFactor);
                             blendWeights /= max(0.00001, blendWeights.x + blendWeights.y + blendWeights.z);
 
-                            float tile0 = _TerrainTileSize0.x > 0.0001 ? _TerrainTileSize0.x : 0.1;
-                            float tile1 = _TerrainTileSize1.x > 0.0001 ? _TerrainTileSize1.x : tile0;
-                            float tile2 = _TerrainTileSize2.x > 0.0001 ? _TerrainTileSize2.x : tile0;
-                            float tile3 = _TerrainTileSize3.x > 0.0001 ? _TerrainTileSize3.x : tile0;
+                            float4 ts0 = _TerrainTileSize0.x > 0.0001 ? _TerrainTileSize0 : float4(0.1, 0.1, 0, 0);
+                            float4 ts1 = _TerrainTileSize1.x > 0.0001 ? _TerrainTileSize1 : ts0;
+                            float4 ts2 = _TerrainTileSize2.x > 0.0001 ? _TerrainTileSize2 : ts0;
+                            float4 ts3 = _TerrainTileSize3.x > 0.0001 ? _TerrainTileSize3 : ts0;
 
-                            float2 uv0_X = input.positionWS.zy * tile0;
-                            float2 uv1_X = input.positionWS.zy * tile1;
-                            float2 uv2_X = input.positionWS.zy * tile2;
-                            float2 uv3_X = input.positionWS.zy * tile3;
+                            float2 uv0_X = tPosZY * ts0.xy + ts0.zw;
+                            float2 uv1_X = tPosZY * ts1.xy + ts1.zw;
+                            float2 uv2_X = tPosZY * ts2.xy + ts2.zw;
+                            float2 uv3_X = tPosZY * ts3.xy + ts3.zw;
 
-                            float2 uv0_Y = groundXZ * tile0;
-                            float2 uv1_Y = groundXZ * tile1;
-                            float2 uv2_Y = groundXZ * tile2;
-                            float2 uv3_Y = groundXZ * tile3;
+                            float2 uv0_Y = tGroundXZ * ts0.xy + ts0.zw;
+                            float2 uv1_Y = tGroundXZ * ts1.xy + ts1.zw;
+                            float2 uv2_Y = tGroundXZ * ts2.xy + ts2.zw;
+                            float2 uv3_Y = tGroundXZ * ts3.xy + ts3.zw;
 
-                            float2 uv0_Z = input.positionWS.xy * tile0;
-                            float2 uv1_Z = input.positionWS.xy * tile1;
-                            float2 uv2_Z = input.positionWS.xy * tile2;
-                            float2 uv3_Z = input.positionWS.xy * tile3;
+                            float2 uv0_Z = tPosXY * ts0.xy + ts0.zw;
+                            float2 uv1_Z = tPosXY * ts1.xy + ts1.zw;
+                            float2 uv2_Z = tPosXY * ts2.xy + ts2.zw;
+                            float2 uv3_Z = tPosXY * ts3.xy + ts3.zw;
 
                             half4 c0_X = SAMPLE_TEXTURE2D(_TerrainSplat0, sampler_BaseMap, uv0_X);
                             half4 c1_X = SAMPLE_TEXTURE2D(_TerrainSplat1, sampler_BaseMap, uv1_X);
@@ -284,15 +285,15 @@ Shader "Ground Blender URP"
 
                             groundNormalTS = nX * blendWeights.x + nY * blendWeights.y + nZ * blendWeights.z;
                         #else
-                            float tile0 = _TerrainTileSize0.x > 0.0001 ? _TerrainTileSize0.x : 0.1;
-                            float tile1 = _TerrainTileSize1.x > 0.0001 ? _TerrainTileSize1.x : tile0;
-                            float tile2 = _TerrainTileSize2.x > 0.0001 ? _TerrainTileSize2.x : tile0;
-                            float tile3 = _TerrainTileSize3.x > 0.0001 ? _TerrainTileSize3.x : tile0;
+                            float4 ts0 = _TerrainTileSize0.x > 0.0001 ? _TerrainTileSize0 : float4(0.1, 0.1, 0, 0);
+                            float4 ts1 = _TerrainTileSize1.x > 0.0001 ? _TerrainTileSize1 : ts0;
+                            float4 ts2 = _TerrainTileSize2.x > 0.0001 ? _TerrainTileSize2 : ts0;
+                            float4 ts3 = _TerrainTileSize3.x > 0.0001 ? _TerrainTileSize3 : ts0;
 
-                            float2 uv0 = groundXZ * tile0;
-                            float2 uv1 = groundXZ * tile1;
-                            float2 uv2 = groundXZ * tile2;
-                            float2 uv3 = groundXZ * tile3;
+                            float2 uv0 = tGroundXZ * ts0.xy + ts0.zw;
+                            float2 uv1 = tGroundXZ * ts1.xy + ts1.zw;
+                            float2 uv2 = tGroundXZ * ts2.xy + ts2.zw;
+                            float2 uv3 = tGroundXZ * ts3.xy + ts3.zw;
 
                             half4 c0 = SAMPLE_TEXTURE2D(_TerrainSplat0, sampler_BaseMap, uv0);
                             half4 c1 = SAMPLE_TEXTURE2D(_TerrainSplat1, sampler_BaseMap, uv1);
