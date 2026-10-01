@@ -19,6 +19,8 @@ public class GroundBlender : MonoBehaviour
         RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
     }
 
+    // Dipanggil tepat sebelum SETIAP kamera render (Scene view, Game view, dll),
+    // jadi posisi terrain selalu fresh meski terrain baru saja digeser.
     private void OnBeginCameraRendering(ScriptableRenderContext context, Camera cam)
     {
         SyncTransform();
@@ -34,6 +36,7 @@ public class GroundBlender : MonoBehaviour
 
     private void Update()
     {
+        // Posisi/size terrain di-update tiap frame (editor & play) supaya ikut kalau terrain digeser
         SyncTransform();
 
         if (!Application.isPlaying && autoUpdateInEditor)
@@ -121,6 +124,8 @@ public class GroundBlender : MonoBehaviour
     }
 }
 
+// Auto-sync tanpa perlu komponen di scene: tiap kamera mau render,
+// posisi & size terrain dikirim ulang ke shader. Jadi pakai GUI material saja sudah cukup.
 public static class GroundBlenderAutoSync
 {
 #if UNITY_EDITOR
@@ -133,9 +138,23 @@ public static class GroundBlenderAutoSync
         RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
     }
 
+    // Terrain yang di-assign lewat GUI material. Kalau null, fallback ke Terrain.activeTerrain.
+    private static Terrain target;
+
+    public static void SetTarget(Terrain t)
+    {
+        target = t;
+        if (t != null) PushAll(t);
+    }
+
     private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera cam)
     {
-        Terrain t = Terrain.activeTerrain;
+        Terrain t = target != null ? target : Terrain.activeTerrain;
+        PushAll(t);
+    }
+
+    private static void PushAll(Terrain t)
+    {
         if (t == null || t.terrainData == null) return;
 
         Vector3 pos = t.transform.position;
@@ -145,6 +164,7 @@ public static class GroundBlenderAutoSync
         PushTileData(t.terrainData.terrainLayers);
     }
 
+    // xy = 1 / tileSize, zw = tileOffset / tileSize  (sama seperti TerrainLit: uv = (local + offset) / tileSize)
     public static void PushTileData(TerrainLayer[] layers)
     {
         for (int i = 0; i < 4; i++)

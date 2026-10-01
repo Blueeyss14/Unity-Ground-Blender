@@ -47,6 +47,12 @@ public class GroundBlendShaderGUI : ShaderGUI
             {
                 selectedTerrain = Terrain.activeTerrain;
             }
+
+            // Restore live-sync target after domain reload
+            if (useTerrainMode && selectedTerrain != null)
+            {
+                GroundBlenderAutoSync.SetTarget(selectedTerrain);
+            }
         }
 
         EditorGUILayout.LabelField("Object Settings", EditorStyles.boldLabel);
@@ -121,6 +127,7 @@ public class GroundBlendShaderGUI : ShaderGUI
             {
                 selectedTerrain = null;
                 selectedGameObject = null;
+                GroundBlenderAutoSync.SetTarget(null);
                 EditorPrefs.DeleteKey("GBlend_Terr_" + targetMat.GetInstanceID());
                 EditorPrefs.DeleteKey("GBlend_GO_" + targetMat.GetInstanceID());
                 Undo.RecordObject(targetMat, "Clear Ground Textures");
@@ -201,25 +208,18 @@ public class GroundBlendShaderGUI : ShaderGUI
                 {
                     Texture2D diffuse = null;
                     Texture2D normal = null;
-                    float tiling = 0.1f;
 
                     if (i < layers.Length && layers[i] != null)
                     {
                         diffuse = layers[i].diffuseTexture;
                         normal = layers[i].normalMapTexture;
-                        if (layers[i].tileSize.x > 0.001f)
-                        {
-                            tiling = 1.0f / layers[i].tileSize.x;
-                        }
                     }
 
                     mat.SetTexture("_TerrainSplat" + i, diffuse);
                     mat.SetTexture("_TerrainNormal" + i, normal);
-                    mat.SetVector("_TerrainTileSize" + i, new Vector4(tiling, tiling, 0, 0));
 
                     if (diffuse != null) Shader.SetGlobalTexture("_TerrainSplat" + i, diffuse);
                     if (normal != null) Shader.SetGlobalTexture("_TerrainNormal" + i, normal);
-                    Shader.SetGlobalVector("_TerrainTileSize" + i, new Vector4(tiling, tiling, 0, 0));
                 }
 
                 if (layers.Length > 0 && layers[0] != null)
@@ -228,15 +228,8 @@ public class GroundBlendShaderGUI : ShaderGUI
                 }
             }
 
-            Vector3 pos = terrainSource.transform.position;
-            Vector3 size = tData.size;
-            Vector4 posVec = new Vector4(pos.x, pos.y, pos.z, 0);
-            Vector4 sizeVec = new Vector4(size.x, size.y, size.z, 0);
-
-            mat.SetVector("_TerrainPosition", posVec);
-            mat.SetVector("_TerrainSize", sizeVec);
-            Shader.SetGlobalVector("_TerrainPosition", posVec);
-            Shader.SetGlobalVector("_TerrainSize", sizeVec);
+            // Position, size, tile size & offset are pushed live by GroundBlenderAutoSync (single source of truth)
+            GroundBlenderAutoSync.SetTarget(terrainSource);
 
             if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 1.0f);
             if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 1.0f);
@@ -244,6 +237,8 @@ public class GroundBlendShaderGUI : ShaderGUI
         }
         else if (goSource != null)
         {
+            GroundBlenderAutoSync.SetTarget(null);
+
             Renderer r = goSource.GetComponent<Renderer>();
             Texture2D albedoTex = null;
             Texture2D normalTex = null;
@@ -279,6 +274,8 @@ public class GroundBlendShaderGUI : ShaderGUI
         }
         else
         {
+            GroundBlenderAutoSync.SetTarget(null);
+
             if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 0.0f);
             Shader.SetGlobalFloat("_HasTerrainData", 0.0f);
             mat.SetTexture("_GroundAlbedoMap", null);
