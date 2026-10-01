@@ -48,7 +48,6 @@ public class GroundBlendShaderGUI : ShaderGUI
                 selectedTerrain = Terrain.activeTerrain;
             }
 
-            // Restore live-sync target after domain reload
             if (useTerrainMode && selectedTerrain != null)
             {
                 GroundBlenderAutoSync.SetTarget(selectedTerrain);
@@ -128,6 +127,7 @@ public class GroundBlendShaderGUI : ShaderGUI
                 selectedTerrain = null;
                 selectedGameObject = null;
                 GroundBlenderAutoSync.SetTarget(null);
+                AssignGroundSource(null);
                 EditorPrefs.DeleteKey("GBlend_Terr_" + targetMat.GetInstanceID());
                 EditorPrefs.DeleteKey("GBlend_GO_" + targetMat.GetInstanceID());
                 Undo.RecordObject(targetMat, "Clear Ground Textures");
@@ -184,6 +184,23 @@ public class GroundBlendShaderGUI : ShaderGUI
         materialEditor.ShaderProperty(useTriplanar, "Use Triplanar Mapping for Ground");
     }
 
+    private static void AssignGroundSource(GameObject go)
+    {
+        GroundBlenderSource[] existing = GroundBlenderSource.All.ToArray();
+        foreach (var src in existing)
+        {
+            if (src != null && (go == null || src.gameObject != go))
+            {
+                Undo.DestroyObjectImmediate(src);
+            }
+        }
+
+        if (go != null && go.GetComponent<GroundBlenderSource>() == null)
+        {
+            Undo.AddComponent<GroundBlenderSource>(go);
+        }
+    }
+
     private void ExtractAndApplyGroundTextures(Material mat, Terrain terrainSource, GameObject goSource)
     {
         if (mat == null) return;
@@ -228,7 +245,6 @@ public class GroundBlendShaderGUI : ShaderGUI
                 }
             }
 
-            // Position, size, tile size & offset are pushed live by GroundBlenderAutoSync (single source of truth)
             GroundBlenderAutoSync.SetTarget(terrainSource);
 
             if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 1.0f);
@@ -238,6 +254,7 @@ public class GroundBlendShaderGUI : ShaderGUI
         else if (goSource != null)
         {
             GroundBlenderAutoSync.SetTarget(null);
+            AssignGroundSource(goSource);
 
             Renderer r = goSource.GetComponent<Renderer>();
             Texture2D albedoTex = null;
@@ -275,6 +292,7 @@ public class GroundBlendShaderGUI : ShaderGUI
         else
         {
             GroundBlenderAutoSync.SetTarget(null);
+            AssignGroundSource(null);
 
             if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 0.0f);
             Shader.SetGlobalFloat("_HasTerrainData", 0.0f);

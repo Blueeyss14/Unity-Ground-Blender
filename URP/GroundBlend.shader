@@ -133,6 +133,15 @@ Shader "Ground Blender URP"
             float4 _TerrainTileSize2;
             float4 _TerrainTileSize3;
 
+            float4x4 _GroundWorldToLocal;
+            float4 _GroundUGrad;
+            float4 _GroundVGrad;
+            float4 _GroundST;
+            float4 _GroundTangentWS;
+            float4 _GroundBitangentWS;
+            float4 _GroundNormalWS;
+            float _HasGroundObject;
+
             Varyings vert(Attributes input)
             {
                 Varyings output = (Varyings)0;
@@ -157,6 +166,14 @@ Shader "Ground Blender URP"
                     return half3(0, 0, 1);
                 }
                 return UnpackNormalScale(texSample, scale);
+            }
+
+            float2 GroundObjectUV(float3 posWS)
+            {
+                float3 l = mul(_GroundWorldToLocal, float4(posWS, 1.0)).xyz;
+                float2 uv = float2(dot(_GroundUGrad.xyz, l) + _GroundUGrad.w,
+                                   dot(_GroundVGrad.xyz, l) + _GroundVGrad.w);
+                return uv * _GroundST.xy + _GroundST.zw;
             }
 
             half4 frag(Varyings input) : SV_Target
@@ -203,7 +220,6 @@ Shader "Ground Blender URP"
                     {
                         float2 terrainUV = saturate((groundXZ - _TerrainPosition.xz) / max(float2(0.001, 0.001), _TerrainSize.xz));
 
-                        // Terrain-local coordinates so tiling follows the terrain position
                         float2 tGroundXZ = groundXZ - _TerrainPosition.xz;
                         float2 tPosZY    = input.positionWS.zy - _TerrainPosition.zy;
                         float2 tPosXY    = input.positionWS.xy - _TerrainPosition.xy;
@@ -320,6 +336,7 @@ Shader "Ground Blender URP"
 
                             float2 uvX = input.positionWS.zy * _GroundTiling;
                             float2 uvY = groundXZ * _GroundTiling;
+                            if (_HasGroundObject >= 0.5) uvY = GroundObjectUV(float3(groundXZ.x, input.positionWS.y, groundXZ.y));
                             float2 uvZ = input.positionWS.xy * _GroundTiling;
 
                             half4 gX = SAMPLE_TEXTURE2D(_GroundAlbedoMap, sampler_BaseMap, uvX);
@@ -335,6 +352,7 @@ Shader "Ground Blender URP"
                             groundNormalTS = nX * blendWeights.x + nY * blendWeights.y + nZ * blendWeights.z;
                         #else
                             float2 groundUV = groundXZ * _GroundTiling;
+                            if (_HasGroundObject >= 0.5) groundUV = GroundObjectUV(float3(groundXZ.x, input.positionWS.y, groundXZ.y));
                             half4 groundTint = (_GroundColor.r + _GroundColor.g + _GroundColor.b < 0.01) ? half4(1,1,1,1) : _GroundColor;
                             groundAlbedo = SAMPLE_TEXTURE2D(_GroundAlbedoMap, sampler_BaseMap, groundUV) * groundTint;
                             groundNormalTS = UnpackGroundNormal(SAMPLE_TEXTURE2D(_GroundBumpMap, sampler_BumpMap, groundUV), _GroundBumpScale);
@@ -343,6 +361,12 @@ Shader "Ground Blender URP"
                 }
 
                 float3 groundNormalWS = normalize(float3(groundNormalTS.x, max(0.1, groundNormalTS.z), groundNormalTS.y));
+                if (_HasGroundTexture >= 0.5 && _HasTerrainData < 0.5 && _HasGroundObject >= 0.5)
+                {
+                    groundNormalWS = normalize(_GroundTangentWS.xyz * groundNormalTS.x
+                                             + _GroundBitangentWS.xyz * groundNormalTS.y
+                                             + _GroundNormalWS.xyz * max(0.1, groundNormalTS.z));
+                }
 
                 half4 finalAlbedo = lerp(groundAlbedo, objectAlbedo, blendFactor);
                 half finalSmoothness = lerp(_GroundSmoothness, _Smoothness, blendFactor);
