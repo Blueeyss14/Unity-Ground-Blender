@@ -65,6 +65,7 @@ public class GroundBlenderSource : MonoBehaviour
         Shader.SetGlobalVector("_GroundTangentWS", t);
         Shader.SetGlobalVector("_GroundBitangentWS", b);
         Shader.SetGlobalVector("_GroundNormalWS", n);
+        Shader.SetGlobalVector("_GroundPositionWS", tr.position);
 
         Shader.SetGlobalFloat("_HasGroundObject", 1f);
     }

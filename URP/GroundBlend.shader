@@ -28,6 +28,8 @@ Shader "Ground Blender URP"
         [HideInInspector] _TerrainNormal1 ("Terrain Normal 1", 2D) = "bump" {}
         [HideInInspector] _TerrainNormal2 ("Terrain Normal 2", 2D) = "bump" {}
         [HideInInspector] _TerrainNormal3 ("Terrain Normal 3", 2D) = "bump" {}
+        [HideInInspector] _TerrainHeightmap ("Terrain Heightmap", 2D) = "black" {}
+        [HideInInspector] _TerrainHeightScale ("Terrain Height Scale", Float) = 0
 
         [Header(Blending Parameters)]
         _BlendDistance ("Blend Distance (Height)", Range(0.01, 5.0)) = 0.8
@@ -105,6 +107,7 @@ Shader "Ground Blender URP"
             TEXTURE2D(_TerrainNormal1);
             TEXTURE2D(_TerrainNormal2);
             TEXTURE2D(_TerrainNormal3);
+            TEXTURE2D(_TerrainHeightmap);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
@@ -124,6 +127,7 @@ Shader "Ground Blender URP"
                 float _NormalBlendStrength;
 
                 float _HasTerrainData;
+                float _TerrainHeightScale;
             CBUFFER_END
 
             float4 _TerrainPosition;
@@ -140,6 +144,7 @@ Shader "Ground Blender URP"
             float4 _GroundTangentWS;
             float4 _GroundBitangentWS;
             float4 _GroundNormalWS;
+            float4 _GroundPositionWS;
             float _HasGroundObject;
 
             Varyings vert(Attributes input)
@@ -183,18 +188,60 @@ Shader "Ground Blender URP"
 
                 float3 sceneWS = ComputeWorldSpacePosition(screenUV, rawDepth, UNITY_MATRIX_I_VP);
 
-                float heightAboveGround = max(0.0, input.positionWS.y - sceneWS.y);
-
                 #if UNITY_REVERSED_Z
                     bool noSceneBehind = rawDepth < 0.00001;
                 #else
                     bool noSceneBehind = rawDepth > 0.99999;
                 #endif
-                if (noSceneBehind) heightAboveGround = _BlendDistance;
+
+                float heightAboveGround = _BlendDistance;
+
+                if (_HasTerrainData >= 0.5)
+                {
+                    float2 tUV = saturate((input.positionWS.xz - _TerrainPosition.xz) / max(float2(0.001, 0.001), _TerrainSize.xz));
+                    float hmSample = UnpackHeightmap(SAMPLE_TEXTURE2D_LOD(_TerrainHeightmap, sampler_BaseMap, tUV, 0));
+                    float hScale = _TerrainHeightScale > 0.01 ? _TerrainHeightScale : (_TerrainSize.y * 2.0);
+                    float terrainH = _TerrainPosition.y + hmSample * hScale;
+
+                    heightAboveGround = max(0.0, input.positionWS.y - terrainH);
+                }
+                else if (_HasGroundObject >= 0.5)
+                {
+                    float hFromObj = dot(input.positionWS - _GroundPositionWS.xyz, _GroundNormalWS.xyz);
+                    heightAboveGround = max(0.0, hFromObj);
+                }
+                else if (!noSceneBehind)
+                {
+                    float3 dWSdx = ddx(sceneWS);
+                    float3 dWSdy = ddy(sceneWS);
+                    float3 sceneNormalWS = normalize(cross(dWSdy, dWSdx));
+
+                    bool isWall = abs(sceneNormalWS.y) < 0.25;
+                    bool isHigher = sceneWS.y > (input.positionWS.y + 0.05);
+                    bool isTooFar = distance(input.positionWS, sceneWS) > max(_BlendDistance * 2.5, 2.0);
+
+                    if (!isWall && !isHigher && !isTooFar)
+                    {
+                        heightAboveGround = max(0.0, input.positionWS.y - sceneWS.y);
+                    }
+                    else
+                    {
+                        heightAboveGround = _BlendDistance;
+                    }
+                }
 
                 float foldH = min(heightAboveGround, _BlendDistance);
                 float2 nXZ = input.normalWS.xz;
                 float2 groundXZ = input.positionWS.xz + nXZ * foldH / max(dot(nXZ, nXZ), 0.04);
+
+                if (_HasTerrainData >= 0.5)
+                {
+                    float2 tUVFold = saturate((groundXZ - _TerrainPosition.xz) / max(float2(0.001, 0.001), _TerrainSize.xz));
+                    float hmFold = UnpackHeightmap(SAMPLE_TEXTURE2D_LOD(_TerrainHeightmap, sampler_BaseMap, tUVFold, 0));
+                    float hScale = _TerrainHeightScale > 0.01 ? _TerrainHeightScale : (_TerrainSize.y * 2.0);
+                    float terrainHFold = _TerrainPosition.y + hmFold * hScale;
+                    heightAboveGround = max(0.0, input.positionWS.y - terrainHFold);
+                }
 
                 float blendFactor = saturate(heightAboveGround / max(0.001, _BlendDistance));
                 blendFactor = pow(blendFactor, max(0.01, _BlendContrast));
