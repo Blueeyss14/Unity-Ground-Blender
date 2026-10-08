@@ -103,6 +103,12 @@ public class GroundBlenderHDRP : MonoBehaviour
             }
         }
 
+        if (tData.heightmapTexture != null)
+        {
+            Shader.SetGlobalTexture("_TerrainHeightmap", tData.heightmapTexture);
+            Shader.SetGlobalFloat("_TerrainHeightScaleHDRP", tData.size.y * (65535.0f / 32766.0f));
+        }
+
         GroundBlenderAutoSyncHDRP.PushTileData(layers);
 
         SyncTransform();
@@ -159,6 +165,11 @@ public static class GroundBlenderAutoSyncHDRP
         Vector3 size = t.terrainData.size;
         Shader.SetGlobalVector("_TerrainPositionHDRP", new Vector4(pos.x, pos.y, pos.z, 0));
         Shader.SetGlobalVector("_TerrainSizeHDRP", new Vector4(size.x, size.y, size.z, 0));
+        if (t.terrainData.heightmapTexture != null)
+        {
+            Shader.SetGlobalTexture("_TerrainHeightmap", t.terrainData.heightmapTexture);
+            Shader.SetGlobalFloat("_TerrainHeightScaleHDRP", size.y * (65535.0f / 32766.0f));
+        }
         PushTileData(t.terrainData.terrainLayers);
     }
 

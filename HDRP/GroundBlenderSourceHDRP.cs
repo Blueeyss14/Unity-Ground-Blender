@@ -65,6 +65,7 @@ public class GroundBlenderSourceHDRP : MonoBehaviour
         Shader.SetGlobalVector("_GroundTangentWSHDRP", t);
         Shader.SetGlobalVector("_GroundBitangentWSHDRP", b);
         Shader.SetGlobalVector("_GroundNormalWSHDRP", n);
+        Shader.SetGlobalVector("_GroundPositionWSHDRP", tr.position);
 
         Shader.SetGlobalFloat("_HasGroundObjectHDRP", 1f);
     }

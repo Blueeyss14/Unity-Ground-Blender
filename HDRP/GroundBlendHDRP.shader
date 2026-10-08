@@ -28,6 +28,8 @@ Shader "Ground Blender HDRP"
         [HideInInspector] _TerrainNormal1 ("Terrain Normal 1", 2D) = "bump" {}
         [HideInInspector] _TerrainNormal2 ("Terrain Normal 2", 2D) = "bump" {}
         [HideInInspector] _TerrainNormal3 ("Terrain Normal 3", 2D) = "bump" {}
+        [HideInInspector] _TerrainHeightmap ("Terrain Heightmap", 2D) = "black" {}
+        [HideInInspector] _TerrainHeightScaleHDRP ("Terrain Height Scale", Float) = 0
 
         [Header(Blending Parameters)]
         _BlendDistance ("Blend Distance (Height)", Range(0.01, 5.0)) = 0.8
@@ -141,6 +143,7 @@ Shader "Ground Blender HDRP"
             TEXTURE2D(_TerrainNormal1);
             TEXTURE2D(_TerrainNormal2);
             TEXTURE2D(_TerrainNormal3);
+            TEXTURE2D(_TerrainHeightmap);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
@@ -160,6 +163,7 @@ Shader "Ground Blender HDRP"
                 float _NormalBlendStrength;
 
                 float _HasTerrainData;
+                float _TerrainHeightScaleHDRP;
             CBUFFER_END
 
             float4 _TerrainPositionHDRP;
@@ -176,6 +180,7 @@ Shader "Ground Blender HDRP"
             float4 _GroundTangentWSHDRP;
             float4 _GroundBitangentWSHDRP;
             float4 _GroundNormalWSHDRP;
+            float4 _GroundPositionWSHDRP;
             float _HasGroundObjectHDRP;
 
 
@@ -223,18 +228,60 @@ Shader "Ground Blender HDRP"
                 float rawDepth = LoadCameraDepth(input.positionCS.xy);
                 float3 sceneAWS = GetAbsolutePositionWS(ComputeWorldSpacePosition(positionNDC, rawDepth, UNITY_MATRIX_I_VP));
 
-                float heightAboveGround = max(0.0, positionAWS.y - sceneAWS.y);
-
                 #if UNITY_REVERSED_Z
                     bool noSceneBehind = rawDepth < 0.00001;
                 #else
                     bool noSceneBehind = rawDepth > 0.99999;
                 #endif
-                if (noSceneBehind) heightAboveGround = _BlendDistance;
+
+                float heightAboveGround = _BlendDistance;
+
+                if (_HasTerrainData >= 0.5)
+                {
+                    float2 tUV = saturate((positionAWS.xz - _TerrainPositionHDRP.xz) / max(float2(0.001, 0.001), _TerrainSizeHDRP.xz));
+                    float hmSample = UnpackHeightmap(SAMPLE_TEXTURE2D_LOD(_TerrainHeightmap, sampler_BaseMap, tUV, 0));
+                    float hScale = _TerrainHeightScaleHDRP > 0.01 ? _TerrainHeightScaleHDRP : (_TerrainSizeHDRP.y * 2.0);
+                    float terrainH = _TerrainPositionHDRP.y + hmSample * hScale;
+
+                    heightAboveGround = max(0.0, positionAWS.y - terrainH);
+                }
+                else if (_HasGroundObjectHDRP >= 0.5)
+                {
+                    float hFromObj = dot(positionAWS - _GroundPositionWSHDRP.xyz, _GroundNormalWSHDRP.xyz);
+                    heightAboveGround = max(0.0, hFromObj);
+                }
+                else if (!noSceneBehind)
+                {
+                    float3 dWSdx = ddx(sceneAWS);
+                    float3 dWSdy = ddy(sceneAWS);
+                    float3 sceneNormalWS = normalize(cross(dWSdy, dWSdx));
+
+                    bool isWall = abs(sceneNormalWS.y) < 0.25;
+                    bool isHigher = sceneAWS.y > (positionAWS.y + 0.05);
+                    bool isTooFar = distance(positionAWS, sceneAWS) > max(_BlendDistance * 2.5, 2.0);
+
+                    if (!isWall && !isHigher && !isTooFar)
+                    {
+                        heightAboveGround = max(0.0, positionAWS.y - sceneAWS.y);
+                    }
+                    else
+                    {
+                        heightAboveGround = _BlendDistance;
+                    }
+                }
 
                 float foldH = min(heightAboveGround, _BlendDistance);
                 float2 nXZ = input.normalWS.xz;
                 float2 groundXZ = positionAWS.xz + nXZ * foldH / max(dot(nXZ, nXZ), 0.04);
+
+                if (_HasTerrainData >= 0.5)
+                {
+                    float2 tUVFold = saturate((groundXZ - _TerrainPositionHDRP.xz) / max(float2(0.001, 0.001), _TerrainSizeHDRP.xz));
+                    float hmFold = UnpackHeightmap(SAMPLE_TEXTURE2D_LOD(_TerrainHeightmap, sampler_BaseMap, tUVFold, 0));
+                    float hScale = _TerrainHeightScaleHDRP > 0.01 ? _TerrainHeightScaleHDRP : (_TerrainSizeHDRP.y * 2.0);
+                    float terrainHFold = _TerrainPositionHDRP.y + hmFold * hScale;
+                    heightAboveGround = max(0.0, positionAWS.y - terrainHFold);
+                }
 
                 float blendFactor = saturate(heightAboveGround / max(0.001, _BlendDistance));
                 blendFactor = pow(blendFactor, max(0.01, _BlendContrast));

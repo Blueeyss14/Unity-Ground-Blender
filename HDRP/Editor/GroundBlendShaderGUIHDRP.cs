@@ -218,6 +218,15 @@ public class GroundBlendShaderGUIHDRP : ShaderGUI
                 Shader.SetGlobalTexture("_TerrainControl", alphaTexs[0]);
             }
 
+            if (tData.heightmapTexture != null)
+            {
+                mat.SetTexture("_TerrainHeightmap", tData.heightmapTexture);
+                Shader.SetGlobalTexture("_TerrainHeightmap", tData.heightmapTexture);
+                float hScale = tData.size.y * (65535.0f / 32766.0f);
+                mat.SetFloat("_TerrainHeightScaleHDRP", hScale);
+                Shader.SetGlobalFloat("_TerrainHeightScaleHDRP", hScale);
+            }
+
             TerrainLayer[] layers = tData.terrainLayers;
             if (layers != null)
             {
