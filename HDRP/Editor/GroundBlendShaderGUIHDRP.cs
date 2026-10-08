@@ -1,0 +1,319 @@
+using UnityEngine;
+using UnityEditor;
+
+public class GroundBlendShaderGUIHDRP : ShaderGUI
+{
+    private Terrain selectedTerrain;
+    private GameObject selectedGameObject;
+    private bool useTerrainMode = true;
+    private bool isInitialized = false;
+
+    public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)
+    {
+        Material targetMat = materialEditor.target as Material;
+        if (targetMat == null) return;
+
+        if (!isInitialized)
+        {
+            isInitialized = true;
+            string keyMode = "GBlend_Mode_" + targetMat.GetInstanceID();
+            string keyGO = "GBlend_GO_" + targetMat.GetInstanceID();
+            string keyTerr = "GBlend_Terr_" + targetMat.GetInstanceID();
+
+            if (EditorPrefs.HasKey(keyMode))
+            {
+                useTerrainMode = EditorPrefs.GetBool(keyMode);
+            }
+            else if (targetMat.HasProperty("_HasTerrainData"))
+            {
+                useTerrainMode = targetMat.GetFloat("_HasTerrainData") > 0.5f;
+            }
+
+            if (useTerrainMode && EditorPrefs.HasKey(keyTerr))
+            {
+                var loadedObj = EditorUtility.InstanceIDToObject(EditorPrefs.GetInt(keyTerr));
+                selectedTerrain = loadedObj as Terrain;
+                if (selectedTerrain == null && loadedObj is GameObject go)
+                {
+                    selectedTerrain = go.GetComponent<Terrain>();
+                }
+            }
+            else if (!useTerrainMode && EditorPrefs.HasKey(keyGO))
+            {
+                selectedGameObject = EditorUtility.InstanceIDToObject(EditorPrefs.GetInt(keyGO)) as GameObject;
+            }
+
+            if (useTerrainMode && selectedTerrain == null && targetMat.HasProperty("_HasTerrainData") && targetMat.GetFloat("_HasTerrainData") > 0.5f)
+            {
+                selectedTerrain = Terrain.activeTerrain;
+            }
+
+            if (useTerrainMode && selectedTerrain != null)
+            {
+                GroundBlenderAutoSyncHDRP.SetTarget(selectedTerrain);
+            }
+        }
+
+        EditorGUILayout.LabelField("Object Settings", EditorStyles.boldLabel);
+        MaterialProperty baseMap = FindProperty("_BaseMap", properties);
+        MaterialProperty baseColor = FindProperty("_BaseColor", properties);
+        MaterialProperty bumpMap = FindProperty("_BumpMap", properties);
+        MaterialProperty bumpScale = FindProperty("_BumpScale", properties);
+        MaterialProperty smoothness = FindProperty("_Smoothness", properties);
+        MaterialProperty metallic = FindProperty("_Metallic", properties);
+
+        materialEditor.ShaderProperty(baseMap, "Object Texture (Albedo)");
+        materialEditor.ShaderProperty(baseColor, "Object Color Tint");
+        materialEditor.ShaderProperty(bumpMap, "Object Normal Map");
+        materialEditor.ShaderProperty(bumpScale, "Object Normal Scale");
+        materialEditor.ShaderProperty(smoothness, "Object Smoothness");
+        materialEditor.ShaderProperty(metallic, "Object Metallic");
+
+        EditorGUILayout.Space(15);
+
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField("Ground Blending Target", EditorStyles.boldLabel);
+
+        EditorGUILayout.BeginHorizontal();
+        bool isTerrainTarget = useTerrainMode;
+        isTerrainTarget = EditorGUILayout.ToggleLeft("Terrain", isTerrainTarget, GUILayout.Width(80));
+        bool isObjectTarget = !useTerrainMode;
+        isObjectTarget = EditorGUILayout.ToggleLeft("Object", isObjectTarget, GUILayout.Width(80));
+        EditorGUILayout.EndHorizontal();
+
+        if (isTerrainTarget && !useTerrainMode)
+        {
+            useTerrainMode = true;
+            EditorPrefs.SetBool("GBlend_Mode_" + targetMat.GetInstanceID(), true);
+        }
+        else if (isObjectTarget && useTerrainMode)
+        {
+            useTerrainMode = false;
+            EditorPrefs.SetBool("GBlend_Mode_" + targetMat.GetInstanceID(), false);
+        }
+
+        EditorGUILayout.HelpBox(useTerrainMode ? "Drag & drop your Terrain directly into the box below to enable ground blending!" : "Drag & drop your Ground GameObject directly into the box below to enable ground blending!", MessageType.Info);
+
+        EditorGUI.BeginChangeCheck();
+
+        UnityEngine.Object newSource = null;
+        if (useTerrainMode)
+        {
+            newSource = EditorGUILayout.ObjectField("Target Terrain", selectedTerrain, typeof(Terrain), true);
+        }
+        else
+        {
+            newSource = EditorGUILayout.ObjectField("Target Object", selectedGameObject, typeof(GameObject), true);
+        }
+
+        if (EditorGUI.EndChangeCheck())
+        {
+            if (newSource is Terrain t)
+            {
+                selectedTerrain = t;
+                selectedGameObject = null;
+                EditorPrefs.SetInt("GBlend_Terr_" + targetMat.GetInstanceID(), t.GetInstanceID());
+                ExtractAndApplyGroundTextures(targetMat, selectedTerrain, null);
+            }
+            else if (newSource is GameObject go)
+            {
+                selectedTerrain = go.GetComponent<Terrain>();
+                selectedGameObject = go;
+                EditorPrefs.SetInt("GBlend_GO_" + targetMat.GetInstanceID(), go.GetInstanceID());
+                ExtractAndApplyGroundTextures(targetMat, selectedTerrain, go);
+            }
+            else
+            {
+                selectedTerrain = null;
+                selectedGameObject = null;
+                GroundBlenderAutoSyncHDRP.SetTarget(null);
+                AssignGroundSource(null);
+                EditorPrefs.DeleteKey("GBlend_Terr_" + targetMat.GetInstanceID());
+                EditorPrefs.DeleteKey("GBlend_GO_" + targetMat.GetInstanceID());
+                Undo.RecordObject(targetMat, "Clear Ground Textures");
+                targetMat.SetTexture("_GroundAlbedoMap", null);
+                targetMat.SetTexture("_GroundBumpMap", null);
+                targetMat.SetTexture("_TerrainControl", null);
+                for (int i = 0; i < 4; i++)
+                {
+                    targetMat.SetTexture("_TerrainSplat" + i, null);
+                    targetMat.SetTexture("_TerrainNormal" + i, null);
+                }
+                if (targetMat.HasProperty("_HasGroundTexture")) targetMat.SetFloat("_HasGroundTexture", 0.0f);
+                if (targetMat.HasProperty("_HasTerrainData")) targetMat.SetFloat("_HasTerrainData", 0.0f);
+                EditorUtility.SetDirty(targetMat);
+            }
+        }
+
+        float hasGround = targetMat.HasProperty("_HasGroundTexture") ? targetMat.GetFloat("_HasGroundTexture") : 0.0f;
+        float hasTerrain = targetMat.HasProperty("_HasTerrainData") ? targetMat.GetFloat("_HasTerrainData") : 0.0f;
+
+        EditorGUILayout.Space(5);
+        if (hasGround >= 0.5f)
+        {
+            if (hasTerrain >= 0.5f && selectedTerrain != null)
+            {
+                EditorGUILayout.LabelField($"Status: Active ({selectedTerrain.name} | All Layers Blended)", EditorStyles.miniBoldLabel);
+            }
+            else
+            {
+                Texture groundAlbedo = targetMat.HasProperty("_GroundAlbedoMap") ? targetMat.GetTexture("_GroundAlbedoMap") : null;
+                float groundTiling = targetMat.HasProperty("_GroundTiling") ? targetMat.GetFloat("_GroundTiling") : 0.1f;
+                string texName = groundAlbedo != null ? groundAlbedo.name : "Active";
+                EditorGUILayout.LabelField($"Status: Active ({texName} | Tiling: {groundTiling:F3})", EditorStyles.miniBoldLabel);
+            }
+        }
+        else
+        {
+            EditorGUILayout.LabelField("Status: Off (No Terrain Assigned)", EditorStyles.miniLabel);
+        }
+
+        EditorGUILayout.EndVertical();
+
+        EditorGUILayout.Space(15);
+
+        EditorGUILayout.LabelField("Blending Parameters", EditorStyles.boldLabel);
+        MaterialProperty blendDist = FindProperty("_BlendDistance", properties);
+        MaterialProperty blendFalloff = FindProperty("_BlendContrast", properties);
+        MaterialProperty normalBlend = FindProperty("_NormalBlendStrength", properties);
+        MaterialProperty useTriplanar = FindProperty("_UseTriplanarGround", properties);
+
+        materialEditor.ShaderProperty(blendDist, "Blend Distance (Height)");
+        materialEditor.ShaderProperty(blendFalloff, "Blend Falloff / Softness");
+        materialEditor.ShaderProperty(normalBlend, "Normal Blend Strength");
+        materialEditor.ShaderProperty(useTriplanar, "Use Triplanar Mapping for Ground");
+    }
+
+    private static void AssignGroundSource(GameObject go)
+    {
+        GroundBlenderSourceHDRP[] existing = GroundBlenderSourceHDRP.All.ToArray();
+        foreach (var src in existing)
+        {
+            if (src != null && (go == null || src.gameObject != go))
+            {
+                Undo.DestroyObjectImmediate(src);
+            }
+        }
+
+        if (go != null && go.GetComponent<GroundBlenderSourceHDRP>() == null)
+        {
+            Undo.AddComponent<GroundBlenderSourceHDRP>(go);
+        }
+    }
+
+    private void ExtractAndApplyGroundTextures(Material mat, Terrain terrainSource, GameObject goSource)
+    {
+        if (mat == null) return;
+
+        Undo.RecordObject(mat, "Update Ground Blend Textures");
+
+        if (terrainSource != null && terrainSource.terrainData != null)
+        {
+            mat.SetColor("_GroundColor", Color.white);
+            TerrainData tData = terrainSource.terrainData;
+            Texture2D[] alphaTexs = tData.alphamapTextures;
+            if (alphaTexs != null && alphaTexs.Length > 0 && alphaTexs[0] != null)
+            {
+                mat.SetTexture("_TerrainControl", alphaTexs[0]);
+                Shader.SetGlobalTexture("_TerrainControl", alphaTexs[0]);
+            }
+
+            TerrainLayer[] layers = tData.terrainLayers;
+            if (layers != null)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    Texture2D diffuse = null;
+                    Texture2D normal = null;
+
+                    if (i < layers.Length && layers[i] != null)
+                    {
+                        diffuse = layers[i].diffuseTexture;
+                        normal = layers[i].normalMapTexture;
+                    }
+
+                    mat.SetTexture("_TerrainSplat" + i, diffuse);
+                    mat.SetTexture("_TerrainNormal" + i, normal);
+
+                    if (diffuse != null) Shader.SetGlobalTexture("_TerrainSplat" + i, diffuse);
+                    if (normal != null) Shader.SetGlobalTexture("_TerrainNormal" + i, normal);
+                }
+
+                if (layers.Length > 0 && layers[0] != null)
+                {
+                    mat.SetTexture("_GroundAlbedoMap", layers[0].diffuseTexture);
+                }
+            }
+
+            GroundBlenderAutoSyncHDRP.SetTarget(terrainSource);
+
+            if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 1.0f);
+            if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 1.0f);
+            Shader.SetGlobalFloat("_HasTerrainData", 1.0f);
+        }
+        else if (goSource != null)
+        {
+            GroundBlenderAutoSyncHDRP.SetTarget(null);
+            AssignGroundSource(goSource);
+
+            Renderer r = goSource.GetComponent<Renderer>();
+            Texture2D albedoTex = null;
+            Texture2D normalTex = null;
+            float tiling = 0.1f;
+
+            if (r != null && r.sharedMaterial != null)
+            {
+                Material groundMat = r.sharedMaterial;
+                string albedoProp = groundMat.HasProperty("_BaseColorMap") ? "_BaseColorMap"
+                                  : (groundMat.HasProperty("_BaseMap") ? "_BaseMap"
+                                  : (groundMat.HasProperty("_MainTex") ? "_MainTex" : null));
+                string normalProp = groundMat.HasProperty("_NormalMap") ? "_NormalMap"
+                                  : (groundMat.HasProperty("_BumpMap") ? "_BumpMap" : null);
+
+                if (albedoProp != null) albedoTex = groundMat.GetTexture(albedoProp) as Texture2D;
+                if (normalProp != null) normalTex = groundMat.GetTexture(normalProp) as Texture2D;
+
+                if (albedoProp != null)
+                {
+                    Vector2 scale = groundMat.GetTextureScale(albedoProp);
+                    if (scale.x > 0) tiling = scale.x * 0.1f;
+                }
+            }
+
+            if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 0.0f);
+            Shader.SetGlobalFloat("_HasTerrainData", 0.0f);
+            if (albedoTex != null)
+            {
+                mat.SetTexture("_GroundAlbedoMap", albedoTex);
+                if (normalTex != null) mat.SetTexture("_GroundBumpMap", normalTex);
+                mat.SetFloat("_GroundTiling", tiling);
+                if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 1.0f);
+            }
+            else
+            {
+                mat.SetTexture("_GroundAlbedoMap", null);
+                mat.SetTexture("_GroundBumpMap", null);
+                if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 0.0f);
+            }
+        }
+        else
+        {
+            GroundBlenderAutoSyncHDRP.SetTarget(null);
+            AssignGroundSource(null);
+
+            if (mat.HasProperty("_HasTerrainData")) mat.SetFloat("_HasTerrainData", 0.0f);
+            Shader.SetGlobalFloat("_HasTerrainData", 0.0f);
+            mat.SetTexture("_GroundAlbedoMap", null);
+            mat.SetTexture("_GroundBumpMap", null);
+            mat.SetTexture("_TerrainControl", null);
+            for (int i = 0; i < 4; i++)
+            {
+                mat.SetTexture("_TerrainSplat" + i, null);
+                mat.SetTexture("_TerrainNormal" + i, null);
+            }
+            if (mat.HasProperty("_HasGroundTexture")) mat.SetFloat("_HasGroundTexture", 0.0f);
+        }
+
+        EditorUtility.SetDirty(mat);
+    }
+}
