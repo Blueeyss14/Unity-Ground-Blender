@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "displayName": "Ground Blender",
   "description": "Ground Blender URP/HDRP tool for Unity.",
-  "unity": "2021.3",
+  "unity": "6000.3",
   "keywords": [
     "ground",
     "blender",
