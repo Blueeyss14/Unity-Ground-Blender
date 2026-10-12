@@ -460,14 +460,26 @@ Shader "Ground Blender HDRP"
                 half finalMetallic = lerp(0.0, _Metallic, blendFactor);
 
                 float3 targetGroundNormal = lerp(float3(0, 1, 0), groundNormalWS, _NormalBlendStrength);
-                float3 finalNormalWS = normalize(lerp(targetGroundNormal, objectNormalWS, blendFactor));
+
+                float3 L = float3(0, 1, 0);
+                if (_DirectionalLightCount > 0)
+                {
+                    L = -_DirectionalLightDatas[0].forward;
+                }
+
+                float meshNdotL = dot(input.normalWS, L);
+                float3 groundNormalNoSun = targetGroundNormal - max(0.0, dot(targetGroundNormal, L)) * L;
+                float lenSq = dot(groundNormalNoSun, groundNormalNoSun);
+                groundNormalNoSun = lenSq > 0.001 ? (groundNormalNoSun * rsqrt(lenSq)) : input.normalWS;
+
+                float sunFactor = smoothstep(0.0, 0.2, meshNdotL);
+                float3 effectiveGroundNormal = normalize(lerp(groundNormalNoSun, targetGroundNormal, sunFactor));
+
+                float3 finalNormalWS = normalize(lerp(effectiveGroundNormal, objectNormalWS, blendFactor));
 
                 float3 V = GetWorldSpaceNormalizeViewDir(positionRWS);
 
-                PositionInputs posInput = GetPositionInput(input.positionCS.xy, _ScreenSize.zw, uint2(input.positionCS.xy) / GetTileSize());
-                posInput.positionWS = positionRWS;
-                posInput.deviceDepth = input.positionCS.z;
-                posInput.linearDepth = LinearEyeDepth(positionRWS, GetWorldToViewMatrix());
+                PositionInputs posInput = GetPositionInput(input.positionCS.xy, _ScreenSize.zw, input.positionCS.z, UNITY_MATRIX_I_VP, UNITY_MATRIX_V, uint2(input.positionCS.xy) / GetTileSize());
 
                 SurfaceData surfaceData;
                 ZERO_INITIALIZE(SurfaceData, surfaceData);
@@ -498,7 +510,6 @@ Shader "Ground Blender HDRP"
                 specularLighting *= GetCurrentExposureMultiplier();
 
                 float4 outColor = float4(diffuseLighting + specularLighting, 1.0);
-                outColor = EvaluateAtmosphericScattering(posInput, V, outColor);
                 return outColor;
             }
             ENDHLSL
@@ -596,6 +607,116 @@ Shader "Ground Blender HDRP"
             }
 
             void FragShadow(Varyings input)
+            {
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthForwardOnly"
+            Tags { "LightMode" = "DepthForwardOnly" }
+
+            Cull Back
+            ZWrite On
+            ZTest LEqual
+
+            HLSLPROGRAM
+            #pragma vertex VertDepth
+            #pragma fragment FragDepth
+
+            #pragma multi_compile _ WRITE_NORMAL_BUFFER
+            #pragma multi_compile_fragment _ WRITE_MSAA_DEPTH
+
+            #define SHADERPASS SHADERPASS_DEPTH_ONLY
+            #define PREFER_HALF 0
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/Material.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Material/NormalBuffer.hlsl"
+
+            struct Attributes
+            {
+                float3 positionOS   : POSITION;
+                float3 normalOS     : NORMAL;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS   : SV_POSITION;
+                float3 normalWS     : TEXCOORD0;
+            };
+
+            Varyings VertDepth(Attributes input)
+            {
+                Varyings output;
+                float3 positionRWS = TransformObjectToWorld(input.positionOS);
+                output.positionCS = TransformWorldToHClip(positionRWS);
+                output.normalWS = TransformObjectToWorldNormal(input.normalOS);
+                return output;
+            }
+
+            void FragDepth(Varyings input
+            #if defined(WRITE_NORMAL_BUFFER)
+                , out float4 outNormalBuffer : SV_Target0
+                #if defined(WRITE_MSAA_DEPTH)
+                , out float4 outDepthColor : SV_Target1
+                #endif
+            #endif
+            )
+            {
+            #if defined(WRITE_NORMAL_BUFFER)
+                #if defined(WRITE_MSAA_DEPTH)
+                outDepthColor = float4(input.positionCS.z, 0, 0, 0);
+                #endif
+
+                NormalData normalData;
+                ZERO_INITIALIZE(NormalData, normalData);
+                normalData.normalWS = normalize(input.normalWS);
+                normalData.perceptualRoughness = 0.5;
+                EncodeIntoNormalBuffer(normalData, input.positionCS.xy, outNormalBuffer);
+            #endif
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode" = "DepthOnly" }
+
+            Cull Back
+            ZWrite On
+            ZTest LEqual
+
+            HLSLPROGRAM
+            #pragma vertex VertDepthOnly
+            #pragma fragment FragDepthOnly
+
+            #define SHADERPASS SHADERPASS_DEPTH_ONLY
+            #define PREFER_HALF 0
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
+
+            struct AttributesDepthOnly
+            {
+                float3 positionOS   : POSITION;
+            };
+
+            struct VaryingsDepthOnly
+            {
+                float4 positionCS   : SV_POSITION;
+            };
+
+            VaryingsDepthOnly VertDepthOnly(AttributesDepthOnly input)
+            {
+                VaryingsDepthOnly output;
+                float3 positionRWS = TransformObjectToWorld(input.positionOS);
+                output.positionCS = TransformWorldToHClip(positionRWS);
+                return output;
+            }
+
+            void FragDepthOnly(VaryingsDepthOnly input)
             {
             }
             ENDHLSL
